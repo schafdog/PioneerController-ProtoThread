@@ -9,19 +9,8 @@
 #define             dtPin                          3     // DT Pin on encoder in 3
 #define             swPin                          4     // SWPin on encoder in 4
 
-// RGB diode
-#define             RED                            7
-#define             GREEN                          8 
-#define             BLUE                           9
-
-
-
-
 // Pins for digital Pot
 #define             CS                             10
-#define MAX_RESISTANCE                         100000
-#define WIPER_RESISTANCE                          100
-#define RESOLUTION                                256
 
 // Globals
 #define             NumOfStepsNeeded               1    // given the travel, you might want increase the number of steps needed for a volume move (my encoder seems too aggressively moving)
@@ -85,14 +74,12 @@ MCP41_Simple pot;
 
 // in the case of the X9C pot, its a percentage and the 104 is 100K with 100 steps so each step is 1000 Ohm or 1K so you just set the percentage directly
 // 
-float values[] = { 3.5,   8.0,  12.0,  16.0,   24.0};
-char* func[] = { "Mute", "Next", "Prev", "Vol+", "Vol-"};
 
-#define REST_MUTE                                  3
-#define REST_TRACKFF                               8
-#define REST_TRACKPV                               12
-#define REST_VOLUMEUP                              16
-#define REST_VOLUMEDOWN                            24
+#define REST_MUTE                                  248
+#define REST_TRACKFF                               235
+#define REST_TRACKPV                               225
+#define REST_VOLUMEUP                              212
+#define REST_VOLUMEDOWN                            194
 #define REST_TRIPLECLICK                           0
 
 
@@ -104,14 +91,6 @@ void setup()
   pinMode(dtPin,INPUT);
   pinMode(swPin,INPUT);
   digitalWrite(swPin,HIGH);
-
-  // RGB
-  pinMode(RED, OUTPUT); 
-  pinMode(GREEN, OUTPUT); 
-  pinMode(BLUE, OUTPUT); 
-  digitalWrite(RED, HIGH); 
-  digitalWrite(GREEN, LOW); 
-  digitalWrite(BLUE, LOW);
 
   // setup POT
   pot.begin(CS);
@@ -177,7 +156,7 @@ static int protothread1(struct pt *pt)
           {
               StillHoldingDown = millis();
               Serial.println("You have held down long enough");             
-              //ClearQueue();
+              ClearQueuePos();
               PulseMute();
               //timestamp = millis(); PT_WAIT_UNTIL(pt, millis() - timestamp > WaitForUnitToComplete);                        // allow other thread some time            
               Serial.println("DONE FORCE MUTE");
@@ -201,7 +180,8 @@ static int protothread1(struct pt *pt)
            }
            PreviousPush = 1;
         }        
-        timestamp = millis(); PT_WAIT_UNTIL(pt, millis() - timestamp > DeBounceDelay);
+        timestamp = millis(); 
+        PT_WAIT_UNTIL(pt, millis() - timestamp > DeBounceDelay);
       }
       else
       {
@@ -250,7 +230,8 @@ static int protothread1(struct pt *pt)
              }
          }
       }
-      timestamp = millis(); PT_WAIT_UNTIL(pt, millis() - timestamp > MinSliceDelay);                        // allow other thread some time            
+      timestamp = millis(); 
+      PT_WAIT_UNTIL(pt, millis() - timestamp > MinSliceDelay);                        // allow other thread some time            
   }
   PT_END(pt);
 }
@@ -258,7 +239,7 @@ static int protothread1(struct pt *pt)
 static int protothread2(struct pt *pt)
 {
   static unsigned long  timestamp                      = 0;  
-  static int16_t        Command                        = 0;
+  static uint16_t       Command                        = 0;
   static unsigned long  PreviousCommandTimeStamp       = 0;  
   static bool           WaitForDisplay                 =false;  
   static unsigned long  TimeWhenInQueue                = 0;  
@@ -285,49 +266,33 @@ static int protothread2(struct pt *pt)
               case VOLUMEUP:    
                 Command = REST_VOLUMEUP;
                 Serial.print("UP ");
-                digitalWrite(RED, LOW); 
-                digitalWrite(GREEN, HIGH); 
-                digitalWrite(BLUE, LOW);
-
                 break;
               case VOLUMEDOWN:
                 Command = REST_VOLUMEDOWN;              
                 Serial.print("DOWN ");
-                digitalWrite(RED, LOW); 
-                digitalWrite(GREEN, LOW); 
-                digitalWrite(BLUE, HIGH);
                 break;
               case TRACKFF:
                 Command = REST_TRACKFF;              
                 Serial.print("FF ");
-                digitalWrite(RED, HIGH); 
-                digitalWrite(GREEN, HIGH); 
-                digitalWrite(BLUE, LOW);
                 break;
               case TRACKPV:
                 Command = REST_TRACKPV;                            
-                digitalWrite(RED, HIGH); 
-                digitalWrite(GREEN, LOW); 
-                digitalWrite(BLUE, HIGH);
                 Serial.print("PV ");
                 break;
               case MUTE:
                 Command = REST_MUTE; 						
                 Serial.print("MUTE ");
-                digitalWrite(RED, HIGH); 
-                digitalWrite(GREEN, HIGH); 
-                digitalWrite(BLUE, HIGH);
                 break;
-              case TRIPLECLICK:
-                Command = REST_TRIPLECLICK;             
-                Serial.print("TRIPLECLICK ");
-                break;                
+//              case TRIPLECLICK:
+//                Command = REST_TRIPLECLICK;             
+//                Serial.print("TRIPLECLICK ");
+//                break;                
               default:
-                Serial.println((String)"Wrong value: " + QueueCommands[LoopOfThread%QUEUEMAXSIZE]);
                 Serial.println((String)"Dont think I should hit these QueueIndex="+QueueIndex+" QueueLastProc="+QueueLastProc+ " CurLimit="+CurLimit);
-                //ClearQueue();
                 Command=0;
-                timestamp = millis();PT_WAIT_UNTIL(pt, millis() - timestamp > DeBounceDelay);    
+                // HACK. If we hit QUEUEMAX we will end here, and stay there until MUTE
+                ClearQueuePos();
+                timestamp = millis();PT_WAIT_UNTIL(pt, millis() - timestamp > DeBounceDelay);
               break;                
             }
             TempCommand = QueueCommands[LoopOfThread%QUEUEMAXSIZE];
@@ -346,14 +311,14 @@ static int protothread2(struct pt *pt)
                 TimeWhenInQueue = millis();
                 
                 
-                int position = RESOLUTION - (Command * 1000.0 - WIPER_RESISTANCE) / (1.0*MAX_RESISTANCE) * RESOLUTION - 1;
-                Serial.println((String) "Command: " + Command + " Position: " + position);
-                pot.setWiper(position);
-                timestamp = millis();PT_WAIT_UNTIL(pt, millis() - timestamp > WaitForUnitToComplete);                       // allow stereo time to handle the input
+                pot.setWiper(Command);
+                timestamp = millis();
+                PT_WAIT_UNTIL(pt, millis() - timestamp > WaitForUnitToComplete);                       // allow stereo time to handle the input
                 Serial.println("CommandDone"); 
-
                 pot.setMax();
-                timestamp = millis();PT_WAIT_UNTIL(pt, millis() - timestamp > WaitForUnitToComplete);                       // allow stereo time to handle the input
+
+                timestamp = millis();
+                PT_WAIT_UNTIL(pt, millis() - timestamp > WaitForUnitToComplete);                       // allow stereo time to handle the input
                 
                 if (WaitForDisplay)
                 {
@@ -372,12 +337,12 @@ static int protothread2(struct pt *pt)
         timestamp = millis();
         if (timestamp-TimeWhenInQueue > WaitTimeForBetweenScreens)
         {
-           if (InsideAQueueProcess) {
+           if (InsideAQueueProcess) 
               Serial.println("The screen is no longer on ");  
-              ClearQueue();
-           }
            InsideAQueueProcess=false;
         }
+        // Since no command is in queue reset to start
+        ClearQueuePos();
       }
       timestamp = millis(); PT_WAIT_UNTIL(pt, millis() - timestamp > MinSliceDelay);                                // allow other thread some time
   }
@@ -438,7 +403,6 @@ int getEncoderTurn(void)
   return result*-1;
 }
 
-
 void IncreaseQueueIndex()
 {  
     QueueIndex++;
@@ -450,12 +414,17 @@ void ClearQueue()
 {
   //init the queue, (not really needed but just in case)
   static int clearloop=0;
+  ClearQueuePos();
+  for (clearloop=0;clearloop<=QUEUEMAXSIZE;clearloop++)
+     QueueCommands[clearloop]=0;
+    
+}
+
+
+void ClearQueuePos() {
   CurLimit=0;
   LoopOfThread=0;
   QueueIndex=0;
   QueueLastProc=0;       
-  for (clearloop=0;clearloop<=QUEUEMAXSIZE;clearloop++)
-     QueueCommands[clearloop]=0;
-    
 }
  
